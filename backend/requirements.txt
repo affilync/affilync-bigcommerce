@@ -23,7 +23,10 @@ pydantic~=2.0.0
 pydantic-settings~=2.0.0
 
 # Affilync Shared Library
--e ../affilync-integrations-common
+# Shared client for Affilync platform ingestion (conversions/adjustments/product sync).
+# Private repo — Render builds need a GitHub token with read access (or use a local
+# sibling checkout for dev: pip install -e ../affilync-integrations-common).
+affilync-integrations-common @ git+https://github.com/moneyflowz367/affilync-integrations-common.git@main
 
 # Development/Testing
 pytest~=8.0.0
