@@ -135,11 +135,13 @@ class ConversionService:
         status_id = order_data.get("status_id", 0)
         status = order_data.get("status", "")
 
-        # Determine conversion type based on status
-        conversion_type = "purchase"
-        # BigCommerce status IDs: 4=Refunded, 5=Cancelled, 6=Declined
-        if status_id in [4]:
-            conversion_type = "refund"
+        # conversion_type MUST be one of the Affilync ConversionCreate enum values
+        # (sale/lead/signup/download/subscription/custom) — "purchase"/"refund"
+        # aren't valid values (same fix already applied to Shopify's equivalent).
+        # An order that arrives already-refunded (rare: refunded before this
+        # webhook fired) still records as "sale" here; process_refund below is
+        # the real refund path for orders that transition to refunded later.
+        conversion_type = "sale"
 
         return ConversionData(
             tracking_code=tracking_code,

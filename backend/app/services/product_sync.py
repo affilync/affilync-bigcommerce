@@ -100,8 +100,7 @@ class ProductSyncService:
             try:
                 await self.api_client.delete_product(
                     brand_id=str(store.brand_id),
-                    external_product_id=f"bigcommerce_{product_id}",
-                    source="bigcommerce",
+                    product_id=str(product.affilync_product_id),
                 )
             except Exception as e:
                 logger.warning(f"Failed to delete product from Affilync: {e}")
