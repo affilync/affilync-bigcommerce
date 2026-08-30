@@ -16,14 +16,23 @@ database_url = settings.database_url
 if database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
 
-# Create async engine
+# Create async engine. Pool sizing args are postgres-only — sqlite's
+# SingletonThreadPool/StaticPool rejects them at create_engine time (the
+# test lane runs on sqlite).
+_pool_kwargs = (
+    {}
+    if database_url.startswith("sqlite")
+    else dict(
+        pool_size=20,
+        max_overflow=10,
+        pool_pre_ping=True,
+        pool_recycle=280,  # Neon times out idle connections at 300s
+    )
+)
 engine = create_async_engine(
     database_url,
     echo=settings.debug,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-    pool_recycle=280,  # Neon times out idle connections at 300s
+    **_pool_kwargs,
 )
 
 # Create session factory

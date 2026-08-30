@@ -1,123 +1,73 @@
+"""Webhook auth + dispatch tests — pinned to the REAL surface.
+
+The old suite POSTed /webhooks/orders, /webhooks/products, /webhooks/app
+(none exist — everything lands on POST /webhooks/bigcommerce) and patched
+backend.app.middleware.hmac_verify.verify_hmac (module path and function
+both nonexistent). V58.36 semantics: BigCommerce authenticates webhooks
+with an `Authorization: Bearer <token>` header compared against
+BIGCOMMERCE_WEBHOOK_SECRET (fallback: the client secret).
 """
-Unit tests for BigCommerce webhook routes.
-"""
 
-import pytest
-import hmac
-import hashlib
-from unittest.mock import patch, AsyncMock
+from app.middleware.hmac_verify import verify_webhook_bearer
 
-
-class TestOrderWebhook:
-    """Tests for order webhook handling."""
-
-    def test_order_created_webhook(self, client, db, sample_webhook_payload):
-        """Test order created webhook processing."""
-        payload = sample_webhook_payload.copy()
-        payload["scope"] = "store/order/created"
-
-        # Mock HMAC verification
-        with patch("backend.app.middleware.hmac_verify.verify_hmac") as mock_verify:
-            mock_verify.return_value = True
-            response = client.post(
-                "/webhooks/orders",
-                json=payload,
-                headers={"X-BC-Webhook-HMAC-SHA256": "test-signature"}
-            )
-            # Should acknowledge webhook
-            assert response.status_code in [200, 202, 204]
-
-    def test_order_updated_webhook(self, client, db, sample_webhook_payload):
-        """Test order updated webhook processing."""
-        payload = sample_webhook_payload.copy()
-        payload["scope"] = "store/order/updated"
-
-        with patch("backend.app.middleware.hmac_verify.verify_hmac") as mock_verify:
-            mock_verify.return_value = True
-            response = client.post(
-                "/webhooks/orders",
-                json=payload,
-                headers={"X-BC-Webhook-HMAC-SHA256": "test-signature"}
-            )
-            assert response.status_code in [200, 202, 204]
-
-    def test_webhook_without_signature_fails(self, client, sample_webhook_payload):
-        """Test webhook without HMAC signature fails."""
-        response = client.post("/webhooks/orders", json=sample_webhook_payload)
-        # Should fail without signature
-        assert response.status_code in [400, 401, 403]
+# conftest sets BIGCOMMERCE_CLIENT_SECRET=test-client-secret and no
+# dedicated webhook secret, so the fallback token is the client secret.
+VALID_AUTH = {"Authorization": "Bearer test-client-secret"}
 
 
-class TestProductWebhook:
-    """Tests for product webhook handling."""
+class TestWebhookBearerVerification:
+    def test_valid_bearer_passes(self):
+        assert verify_webhook_bearer("Bearer test-client-secret") is True
 
-    def test_product_created_webhook(self, client, db, sample_webhook_payload):
-        """Test product created webhook processing."""
-        payload = sample_webhook_payload.copy()
-        payload["scope"] = "store/product/created"
-        payload["data"] = {"type": "product", "id": 789}
+    def test_wrong_token_fails(self):
+        assert verify_webhook_bearer("Bearer wrong-token") is False
 
-        with patch("backend.app.middleware.hmac_verify.verify_hmac") as mock_verify:
-            mock_verify.return_value = True
-            response = client.post(
-                "/webhooks/products",
-                json=payload,
-                headers={"X-BC-Webhook-HMAC-SHA256": "test-signature"}
-            )
-            assert response.status_code in [200, 202, 204]
+    def test_missing_header_fails(self):
+        assert verify_webhook_bearer("") is False
 
-    def test_product_deleted_webhook(self, client, db, sample_webhook_payload):
-        """Test product deleted webhook processing."""
-        payload = sample_webhook_payload.copy()
-        payload["scope"] = "store/product/deleted"
-        payload["data"] = {"type": "product", "id": 789}
-
-        with patch("backend.app.middleware.hmac_verify.verify_hmac") as mock_verify:
-            mock_verify.return_value = True
-            response = client.post(
-                "/webhooks/products",
-                json=payload,
-                headers={"X-BC-Webhook-HMAC-SHA256": "test-signature"}
-            )
-            assert response.status_code in [200, 202, 204]
+    def test_non_bearer_scheme_fails(self):
+        assert verify_webhook_bearer("Basic test-client-secret") is False
 
 
-class TestHMACVerification:
-    """Tests for HMAC signature verification."""
+class TestWebhookEndpoint:
+    """POST /webhooks/bigcommerce."""
 
-    def test_valid_hmac_passes(self, client, sample_webhook_payload):
-        """Test that valid HMAC signature passes verification."""
-        import json
-        import os
+    def test_rejects_missing_auth(self, client, sample_webhook_payload):
+        response = client.post("/webhooks/bigcommerce", json=sample_webhook_payload)
+        assert response.status_code == 401
 
-        client_secret = os.environ.get("BIGCOMMERCE_CLIENT_SECRET", "test-secret")
-        payload_str = json.dumps(sample_webhook_payload)
+    def test_rejects_wrong_bearer(self, client, sample_webhook_payload):
+        response = client.post(
+            "/webhooks/bigcommerce",
+            json=sample_webhook_payload,
+            headers={"Authorization": "Bearer forged"},
+        )
+        assert response.status_code == 401
 
-        # Generate valid HMAC
-        signature = hmac.new(
-            client_secret.encode(),
-            payload_str.encode(),
-            hashlib.sha256
-        ).hexdigest()
+    def test_invalid_json_is_400(self, client):
+        response = client.post(
+            "/webhooks/bigcommerce",
+            content=b"not json",
+            headers={**VALID_AUTH, "Content-Type": "application/json"},
+        )
+        assert response.status_code == 400
 
-        with patch("backend.app.middleware.hmac_verify.verify_hmac") as mock_verify:
-            mock_verify.return_value = True
-            response = client.post(
-                "/webhooks/orders",
-                json=sample_webhook_payload,
-                headers={"X-BC-Webhook-HMAC-SHA256": signature}
-            )
-            # Should not fail due to HMAC
-            assert response.status_code != 401
+    def test_missing_producer_is_acknowledged_ignored(self, client):
+        """No producer => no store hash; acknowledged as ignored (BC would
+        otherwise retry forever)."""
+        response = client.post(
+            "/webhooks/bigcommerce",
+            json={"scope": "store/order/created", "data": {}},
+            headers=VALID_AUTH,
+        )
+        assert response.status_code == 200
+        assert response.json() == {"status": "ignored", "reason": "missing_store_hash"}
 
-    def test_invalid_hmac_fails(self, client, sample_webhook_payload):
-        """Test that invalid HMAC signature fails verification."""
-        with patch("backend.app.middleware.hmac_verify.verify_hmac") as mock_verify:
-            mock_verify.return_value = False
-            response = client.post(
-                "/webhooks/orders",
-                json=sample_webhook_payload,
-                headers={"X-BC-Webhook-HMAC-SHA256": "invalid-signature"}
-            )
-            # Should fail with invalid signature
-            assert response.status_code in [401, 403]
+    def test_unknown_store_is_acknowledged_ignored(self, client, sample_webhook_payload):
+        response = client.post(
+            "/webhooks/bigcommerce",
+            json=sample_webhook_payload,
+            headers=VALID_AUTH,
+        )
+        assert response.status_code == 200
+        assert response.json() == {"status": "ignored", "reason": "store_not_found"}

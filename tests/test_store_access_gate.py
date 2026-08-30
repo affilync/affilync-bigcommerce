@@ -15,14 +15,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from backend.app.routes.api import get_current_store
+from app.routes.api import get_current_store
 
 
 def _run(auth, store_hash="store-A", store_brand_id="brand-1"):
     store = MagicMock()
     store.brand_id = store_brand_id
     store.is_active = True
-    with patch("backend.app.routes.api.StoreService") as MockSvc:
+    with patch("app.routes.api.StoreService") as MockSvc:
         MockSvc.return_value.get_store_by_hash = AsyncMock(return_value=store)
         return asyncio.run(
             get_current_store(store_hash=store_hash, db=AsyncMock(), auth=auth)

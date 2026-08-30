@@ -7,7 +7,7 @@ billing route auth/validation behavior.
 
 from decimal import Decimal
 
-from backend.app.services.billing_service import (
+from app.services.billing_service import (
     PLANS,
     PLAN_ORDER,
     BillingPlan,

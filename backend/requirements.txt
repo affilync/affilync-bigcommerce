@@ -4,7 +4,7 @@ uvicorn[standard]~=0.27.0
 python-multipart~=0.0.9
 
 # Database
-sqlalchemy~=2.0.0
+sqlalchemy[asyncio]~=2.0.0  # [asyncio] pins greenlet on every platform (SQLAlchemy 2.1 moves it to this extra; 2.0 skips it on some)
 asyncpg~=0.29.0
 alembic~=1.13.0
 

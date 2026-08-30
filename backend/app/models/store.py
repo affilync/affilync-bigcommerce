@@ -7,7 +7,9 @@ from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import Boolean, Column, DateTime, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
+
+from app.models._types import JSONB
 from sqlalchemy.orm import relationship
 
 from app.database import Base

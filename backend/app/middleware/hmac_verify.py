@@ -22,6 +22,7 @@ import hmac
 import logging
 from typing import Callable
 
+from fastapi.responses import JSONResponse
 from fastapi import HTTPException, Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -90,9 +91,15 @@ class WebhookHMACMiddleware(BaseHTTPMiddleware):
 
         if not verify_webhook_bearer(authorization):
             logger.warning("BC webhook bearer verification failed")
-            raise HTTPException(
+            # Return, don't raise: HTTPException raised inside
+            # BaseHTTPMiddleware.dispatch never reaches FastAPI's exception
+            # handlers (they wrap the router, INSIDE user middleware), so it
+            # surfaced as a raw 500 — and BigCommerce retries 5xx, meaning
+            # forged/broken deliveries were retried indefinitely instead of
+            # being dropped on a definitive 401.
+            return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid webhook credentials",
+                content={"detail": "Invalid webhook credentials"},
             )
 
         # SEC: replay protection. Same logic as before — captured
@@ -116,12 +123,11 @@ class WebhookHMACMiddleware(BaseHTTPMiddleware):
                     logger.warning(
                         "Replayed BigCommerce webhook rejected: %s", replay_key[:60]
                     )
-                    raise HTTPException(
+                    # Same return-don't-raise rule as the 401 above.
+                    return JSONResponse(
                         status_code=status.HTTP_409_CONFLICT,
-                        detail="Webhook already processed",
+                        content={"detail": "Webhook already processed"},
                     )
-        except HTTPException:
-            raise
         except Exception as redis_err:
             # Redis unreachable — log and allow. Webhooks are idempotent
             # on the application side; HMAC has already validated the
