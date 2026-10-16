@@ -26,11 +26,18 @@ class TestOAuthAuthStart:
         assert "state=" in location
         assert "client_id=test-client-id" in location
 
-    def test_state_storage_down_fails_closed(self, client):
+    def test_state_storage_down_fails_closed(self, client, monkeypatch):
         """Redis down => refuse to issue an auth URL we cannot validate
         (deliberate 503 — do not ship a merchant into an unvalidatable
-        OAuth flow)."""
-        response = client.get("/oauth/auth", follow_redirects=False)
+        OAuth flow).
+
+        Production (ENVIRONMENT unset, as render.yaml leaves it) with no Redis.
+        It used to rely on the runner's environment: under CI's own
+        ENVIRONMENT=test the dev in-memory fallback answered 307, so the test
+        was red in CI while passing locally."""
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+        with patch("app.routes.oauth._get_redis", new=AsyncMock(return_value=None)):
+            response = client.get("/oauth/auth", follow_redirects=False)
         assert response.status_code == 503
 
     def test_callback_via_auth_requires_state(self, client):
